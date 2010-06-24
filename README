@@ -1,0 +1,8 @@
+Author:
+Harry Wang (coolwhy AT gmail DOT com)
+
+Summary:
+Avro RPC library based on Netty. Avro (http://avro.apache.org) is a serialization system which supports cross language data exchanging. Netty (http://www.jboss.org/netty) is a Java Network application framework. So this project is a Java library which support Avro RPC using Netty.
+
+License:
+This project is licensed under the Apache License Version 2.0
