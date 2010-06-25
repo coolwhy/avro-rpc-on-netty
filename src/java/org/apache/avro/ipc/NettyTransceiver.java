@@ -8,7 +8,6 @@ import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -41,7 +40,6 @@ public class NettyTransceiver extends Transceiver {
     private Channel channel;
 	private BlockingQueue<List<ByteBuffer>> answers = 
 		new LinkedBlockingQueue<List<ByteBuffer>>();
-	private AtomicInteger requestCount = new AtomicInteger(0);
 	
 	// an identification which means an network exception occurred while waiting for the answer
 	private static final List<ByteBuffer> EXCEPTION_OCCURRED = 
@@ -94,7 +92,6 @@ public class NettyTransceiver extends Transceiver {
 	public void writeBuffers(List<ByteBuffer> buffers) throws IOException {
 		// asynchronous operation
 		channel.write(buffers);
-		requestCount.incrementAndGet();
 	}
 	
 	@Override
@@ -110,11 +107,12 @@ public class NettyTransceiver extends Transceiver {
 				interrupted = true;
 			}
 		}
+        if (res==EXCEPTION_OCCURRED) {
+        	answers.offer(res); //offer it again to let those who are waiting exit
+        	throw new IOException("wait for response failed");
+        }
         if (interrupted) {
             Thread.currentThread().interrupt();
-        }
-        if (res==EXCEPTION_OCCURRED) {
-        	throw new IOException("wait for response failed");
         }
         return res;
 	}
@@ -142,7 +140,6 @@ public class NettyTransceiver extends Transceiver {
 		@Override
 	    public void messageReceived(
 	            ChannelHandlerContext ctx, final MessageEvent e) {
-	    	requestCount.decrementAndGet();
 	    	answers.offer((List<ByteBuffer>)e.getMessage());
 	    }
 
@@ -154,11 +151,8 @@ public class NettyTransceiver extends Transceiver {
 	                "Unexpected exception from downstream.",
 	                e.getCause());
 	        e.getChannel().close();
-	        int leftRequest = requestCount.get();
-	        for(int i=0;i<leftRequest;i++) {
-	        	// let the blocking waiting exit
-	        	answers.offer(EXCEPTION_OCCURRED);
-	        }
+        	// let the blocking waiting exit
+        	answers.offer(EXCEPTION_OCCURRED);
 	    }
 	    
 	}
