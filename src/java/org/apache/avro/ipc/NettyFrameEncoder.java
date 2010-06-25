@@ -34,7 +34,7 @@ public class NettyFrameEncoder extends OneToOneEncoder {
 		List<ByteBuffer> origs = (List<ByteBuffer>)msg;
 		List<ByteBuffer> bbs = new ArrayList<ByteBuffer>(origs.size()*2 + 1);
 		for (ByteBuffer b : origs) {
-			bbs.add(getLengthHeader(b)); // prepend length field;
+			bbs.add(getLengthHeader(b)); // prepend length field
 			bbs.add(b);
 		}
 		bbs.add(TERMINATOR);
