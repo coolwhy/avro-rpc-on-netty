@@ -1,15 +1,37 @@
+/**
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.avro.ipc;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
-import java.util.concurrent.BlockingQueue;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.jboss.netty.bootstrap.ClientBootstrap;
 import org.jboss.netty.channel.Channel;
@@ -25,136 +47,191 @@ import org.jboss.netty.channel.ExceptionEvent;
 import org.jboss.netty.channel.MessageEvent;
 import org.jboss.netty.channel.SimpleChannelUpstreamHandler;
 import org.jboss.netty.channel.socket.nio.NioClientSocketChannelFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
- * Avro Transceiver based on Netty
+ * A Netty-based {@link Transceiver} implementation.
  * 
  * @author why
  * @version $Date:2010-06-20 $
  */
 public class NettyTransceiver extends Transceiver {
-    private static final Logger logger = Logger.getLogger(
-    		NettyTransceiver.class.getName());
+  private static final Logger LOG = LoggerFactory.getLogger(NettyTransceiver.class
+      .getName());
+
+  private ChannelFactory channelFactory;
+  private Channel channel;
+  
+  private AtomicInteger serialGenerator = new AtomicInteger(0);
+  private Map<Integer, CallFuture> requests = 
+    new ConcurrentHashMap<Integer, CallFuture>();
+  
+  public NettyTransceiver(InetSocketAddress addr) {
+    // Set up.
+    channelFactory = new NioClientSocketChannelFactory(Executors
+        .newCachedThreadPool(), Executors.newCachedThreadPool());
+    ClientBootstrap bootstrap = new ClientBootstrap(channelFactory);
+
+    // Configure the event pipeline factory.
+    bootstrap.setPipelineFactory(new ChannelPipelineFactory() {
+      @Override
+      public ChannelPipeline getPipeline() throws Exception {
+        ChannelPipeline p = Channels.pipeline();
+        p.addLast("frameDecoder", new NettyFrameDecoder());
+        p.addLast("frameEncoder", new NettyFrameEncoder());
+        p.addLast("handler", new NettyClientAvroHandler());
+        return p;
+      }
+    });
+
+    bootstrap.setOption("tcpNoDelay", true);
+
+    // Make a new connection.
+    ChannelFuture channelFuture = bootstrap.connect(addr);
+    channelFuture.awaitUninterruptibly();
+    if (!channelFuture.isSuccess()) {
+      channelFuture.getCause().printStackTrace();
+      throw new RuntimeException(channelFuture.getCause());
+    }
+    channel = channelFuture.getChannel();
+  }
+
+  public void close() {
+    // Close the connection.
+    channel.close().awaitUninterruptibly();
+    // Shut down all thread pools to exit.
+    channelFactory.releaseExternalResources();
+  }
+
+  @Override
+  public String getRemoteName() {
+    return channel.getRemoteAddress().toString();
+  }
+
+  @Override
+  public synchronized List<ByteBuffer> transceive(List<ByteBuffer> request)
+      throws IOException {
+    int serial = serialGenerator.incrementAndGet();
+    NettyDataPack dataPack = new NettyDataPack(serial, request);
+    CallFuture callFuture = new CallFuture();
+    requests.put(serial, callFuture);
+    channel.write(dataPack);
+    try {
+      return callFuture.get();
+    } catch (InterruptedException e) {
+      LOG.warn("failed to get the response", e);
+      return null;
+    } catch (ExecutionException e) {
+      LOG.warn("failed to get the response", e);
+      return null;
+    } finally {
+      requests.remove(serial);
+    }
+  }
+
+  @Override
+  public void writeBuffers(List<ByteBuffer> buffers) throws IOException {
+    throw new RuntimeException("Not supported");
+  }
+
+  @Override
+  public List<ByteBuffer> readBuffers() throws IOException {
+    throw new RuntimeException("Not supported");  
+  }
+  
+  class CallFuture implements Future<List<ByteBuffer>>{
+    private Semaphore sem = new Semaphore(0);
+    private List<ByteBuffer> response = null;
     
-    private ChannelFactory channelFactory;
-    private Channel channel;
-	private BlockingQueue<List<ByteBuffer>> answers = 
-		new LinkedBlockingQueue<List<ByteBuffer>>();
-	
-	// an identification which means an network exception occurred while waiting for the answer
-	private static final List<ByteBuffer> EXCEPTION_OCCURRED = 
-		new ArrayList<ByteBuffer>(0);
-	
-	public NettyTransceiver(InetSocketAddress addr) {
-        // Set up.
-		channelFactory = new NioClientSocketChannelFactory(
-                Executors.newCachedThreadPool(),
-                Executors.newCachedThreadPool());
-        ClientBootstrap bootstrap = new ClientBootstrap(channelFactory);
+    public void setResponse(List<ByteBuffer> response) {
+      this.response = response;
+      sem.release();
+    }
+    
+    public void releaseSemphore() {
+      sem.release();
+    }
 
-        // Configure the event pipeline factory.
-        bootstrap.setPipelineFactory(new ChannelPipelineFactory() {
-    		@Override
-    		public ChannelPipeline getPipeline() throws Exception {
-    			ChannelPipeline p = Channels.pipeline();
-    			p.addLast("frameDecoder", new NettyFrameDecoder());
-    			p.addLast("frameEncoder", new NettyFrameEncoder());
-    			p.addLast("handler", new NettyClientAvroHandler());
-    			return p;
-    		}
-        });
+    public List<ByteBuffer> getResponse() {
+      return response;
+    }
 
-        bootstrap.setOption("tcpNoDelay", true);
-        
-        // Make a new connection.
-        ChannelFuture channelFuture = bootstrap.connect(addr);
-        channelFuture.awaitUninterruptibly();
-        if (!channelFuture.isSuccess()) {
-        	channelFuture.getCause().printStackTrace();
-        	throw new RuntimeException(channelFuture.getCause());
-        }
-        channel = channelFuture.getChannel();
-	}
+    @Override
+    public boolean cancel(boolean mayInterruptIfRunning) {
+      return false;
+    }
 
-	public void close() {
-		// Close the connection.
-		channel.close().awaitUninterruptibly();
-		// Shut down all thread pools to exit.
-		channelFactory.releaseExternalResources();
-	}
-	
-	@Override
-	public String getRemoteName() {
-		return channel.getRemoteAddress().toString();
-	}
+    @Override
+    public boolean isCancelled() {
+      return false;
+    }
 
-	@Override
-	public void writeBuffers(List<ByteBuffer> buffers) throws IOException {
-		// asynchronous operation
-		channel.write(buffers);
-	}
-	
-	@Override
-	public List<ByteBuffer> readBuffers() throws IOException {
-		// block the operation until the answer is got
-		boolean interrupted = false;
-		List<ByteBuffer> res;
-		while(true) {
-			try {
-				res = answers.take();
-				break;
-			} catch (InterruptedException e) {
-				interrupted = true;
-			}
-		}
-        if (res==EXCEPTION_OCCURRED) {
-        	answers.offer(res); //offer it again to let those who are waiting exit
-        	throw new IOException("wait for response failed");
-        }
-        if (interrupted) {
-            Thread.currentThread().interrupt();
-        }
-        return res;
-	}
+    @Override
+    public List<ByteBuffer> get() throws InterruptedException,
+        ExecutionException {
+      sem.acquire();
+      return response;
+    }
 
-	class NettyClientAvroHandler extends SimpleChannelUpstreamHandler {
-		//private Channel channel; // connection
-		
-	    @Override
-	    public void handleUpstream(
-	            ChannelHandlerContext ctx, ChannelEvent e) throws Exception {
-	        if (e instanceof ChannelStateEvent) {
-	            logger.info(e.toString());
-	        }
-	        super.handleUpstream(ctx, e);
-	    }
+    @Override
+    public List<ByteBuffer> get(long timeout, TimeUnit unit)
+        throws InterruptedException, ExecutionException, TimeoutException {
+      if (sem.tryAcquire(timeout, unit)) {
+        return response;
+      } else {
+        throw new TimeoutException();
+      }
+    }
 
-	    @Override
-	    public void channelOpen(ChannelHandlerContext ctx, ChannelStateEvent e)
-	            throws Exception {
-	        //channel = e.getChannel();
-	        super.channelOpen(ctx, e);
-	    }
+    @Override
+    public boolean isDone() {
+      return response!=null;
+    }
+    
+  }
 
-	    @SuppressWarnings("unchecked")
-		@Override
-	    public void messageReceived(
-	            ChannelHandlerContext ctx, final MessageEvent e) {
-	    	answers.offer((List<ByteBuffer>)e.getMessage());
-	    }
+  class NettyClientAvroHandler extends SimpleChannelUpstreamHandler {
 
-	    @Override
-	    public void exceptionCaught(
-	            ChannelHandlerContext ctx, ExceptionEvent e) {
-	        logger.log(
-	                Level.WARNING,
-	                "Unexpected exception from downstream.",
-	                e.getCause());
-	        e.getChannel().close();
-        	// let the blocking waiting exit
-        	answers.offer(EXCEPTION_OCCURRED);
-	    }
-	    
-	}
+    @Override
+    public void handleUpstream(ChannelHandlerContext ctx, ChannelEvent e)
+        throws Exception {
+      if (e instanceof ChannelStateEvent) {
+        LOG.info(e.toString());
+      }
+      super.handleUpstream(ctx, e);
+    }
+
+    @Override
+    public void channelOpen(ChannelHandlerContext ctx, ChannelStateEvent e)
+        throws Exception {
+      // channel = e.getChannel();
+      super.channelOpen(ctx, e);
+    }
+
+    @Override
+    public void messageReceived(ChannelHandlerContext ctx, final MessageEvent e) {
+      NettyDataPack dataPack = (NettyDataPack)e.getMessage();
+      CallFuture callFuture = requests.get(dataPack.getSerial());
+      if (callFuture==null) {
+        throw new RuntimeException("Missing previous call info");
+      }
+      callFuture.setResponse(dataPack.getDatas());
+    }
+
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, ExceptionEvent e) {
+      LOG.warn("Unexpected exception from downstream.", e.getCause());
+      e.getChannel().close();
+      // let the blocking waiting exit
+      Iterator<CallFuture> it = requests.values().iterator();
+      while(it.hasNext()) {
+        it.next().releaseSemphore();
+        it.remove();
+      }
+      
+    }
+
+  }
 
 }
