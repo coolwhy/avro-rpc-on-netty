@@ -49,7 +49,7 @@ public class NettyFrameEncoder extends OneToOneEncoder {
     NettyDataPack dataPack = (NettyDataPack)msg;
     List<ByteBuffer> origs = dataPack.getDatas();
     List<ByteBuffer> bbs = new ArrayList<ByteBuffer>(origs.size() * 2 + 1);
-    bbs.add(getPackHeader(dataPack)); // prepend a pack header include serial number and list size
+    bbs.add(getPackHeader(dataPack)); // prepend a pack header including serial number and list size
     for (ByteBuffer b : origs) {
       bbs.add(getLengthHeader(b)); // for each buffer prepend length field
       bbs.add(b);

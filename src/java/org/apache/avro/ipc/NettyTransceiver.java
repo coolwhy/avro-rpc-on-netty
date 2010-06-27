@@ -215,8 +215,9 @@ public class NettyTransceiver extends Transceiver {
       CallFuture callFuture = requests.get(dataPack.getSerial());
       if (callFuture==null) {
         throw new RuntimeException("Missing previous call info");
+      } else {
+        callFuture.setResponse(dataPack.getDatas());
       }
-      callFuture.setResponse(dataPack.getDatas());
     }
 
     @Override
