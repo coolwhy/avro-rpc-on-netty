@@ -33,6 +33,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.apache.avro.Protocol;
 import org.jboss.netty.bootstrap.ClientBootstrap;
 import org.jboss.netty.channel.Channel;
 import org.jboss.netty.channel.ChannelEvent;
@@ -66,6 +67,8 @@ public class NettyTransceiver extends Transceiver {
   private AtomicInteger serialGenerator = new AtomicInteger(0);
   private Map<Integer, CallFuture> requests = 
     new ConcurrentHashMap<Integer, CallFuture>();
+  
+//  private Protocol remote;
   
   public NettyTransceiver(InetSocketAddress addr) {
     // Set up.
@@ -109,8 +112,11 @@ public class NettyTransceiver extends Transceiver {
     return channel.getRemoteAddress().toString();
   }
 
+  /**
+   * Override as non-synchronized method because the method is thread safe.
+   */
   @Override
-  public synchronized List<ByteBuffer> transceive(List<ByteBuffer> request)
+  public List<ByteBuffer> transceive(List<ByteBuffer> request)
       throws IOException {
     int serial = serialGenerator.incrementAndGet();
     NettyDataPack dataPack = new NettyDataPack(serial, request);
@@ -132,13 +138,15 @@ public class NettyTransceiver extends Transceiver {
 
   @Override
   public void writeBuffers(List<ByteBuffer> buffers) throws IOException {
-    throw new RuntimeException("Not supported");
+    throw new UnsupportedOperationException();
   }
 
   @Override
   public List<ByteBuffer> readBuffers() throws IOException {
-    throw new RuntimeException("Not supported");  
+    throw new UnsupportedOperationException();  
   }
+  
+  
   
   class CallFuture implements Future<List<ByteBuffer>>{
     private Semaphore sem = new Semaphore(0);
