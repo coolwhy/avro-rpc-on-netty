@@ -34,6 +34,9 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.avro.Protocol;
+import org.apache.avro.ipc.NettyTransportCodec.NettyDataPack;
+import org.apache.avro.ipc.NettyTransportCodec.NettyFrameDecoder;
+import org.apache.avro.ipc.NettyTransportCodec.NettyFrameEncoder;
 import org.jboss.netty.bootstrap.ClientBootstrap;
 import org.jboss.netty.channel.Channel;
 import org.jboss.netty.channel.ChannelEvent;
@@ -68,7 +71,7 @@ public class NettyTransceiver extends Transceiver {
   private Map<Integer, CallFuture> requests = 
     new ConcurrentHashMap<Integer, CallFuture>();
   
-//  private Protocol remote;
+  private Protocol remote;
   
   public NettyTransceiver(InetSocketAddress addr) {
     // Set up.
@@ -145,9 +148,25 @@ public class NettyTransceiver extends Transceiver {
   public List<ByteBuffer> readBuffers() throws IOException {
     throw new UnsupportedOperationException();  
   }
+
+//  @Override
+  public Protocol getRemote() {
+    return remote;
+  }
+
+//  @Override
+  public boolean isConnected() {
+    return remote!=null;
+  }
+
+//  @Override
+  public void setRemote(Protocol protocol) {
+    this.remote = protocol;
+  }
   
-  
-  
+  /**
+   * Future class for a RPC call
+   */
   class CallFuture implements Future<List<ByteBuffer>>{
     private Semaphore sem = new Semaphore(0);
     private List<ByteBuffer> response = null;
@@ -194,11 +213,14 @@ public class NettyTransceiver extends Transceiver {
 
     @Override
     public boolean isDone() {
-      return response!=null;
+      return sem.availablePermits()>0;
     }
     
   }
 
+  /**
+   * Avro client handler for the Netty transport 
+   */
   class NettyClientAvroHandler extends SimpleChannelUpstreamHandler {
 
     @Override

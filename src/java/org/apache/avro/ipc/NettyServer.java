@@ -24,6 +24,9 @@ import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.concurrent.Executors;
 
+import org.apache.avro.ipc.NettyTransportCodec.NettyDataPack;
+import org.apache.avro.ipc.NettyTransportCodec.NettyFrameDecoder;
+import org.apache.avro.ipc.NettyTransportCodec.NettyFrameEncoder;
 import org.jboss.netty.bootstrap.ServerBootstrap;
 import org.jboss.netty.channel.Channel;
 import org.jboss.netty.channel.ChannelEvent;
@@ -101,6 +104,9 @@ public class NettyServer extends Thread implements Server {
     allChannels.add(serverChannel);
   }
 
+  /**
+   * Avro server handler for the Netty transport 
+   */
   class NettyServerAvroHandler extends SimpleChannelUpstreamHandler {
 
     @Override
