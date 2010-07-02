@@ -3,6 +3,7 @@ Harry Wang (coolwhy AT gmail DOT com)
 
 Summary:
 Avro RPC library based on Netty. Avro (http://avro.apache.org) is a serialization system which supports cross language data exchanging. Netty (http://www.jboss.org/netty) is a Java Network application framework. So this project is a Java library which support Avro RPC using Netty.
+This project's code has been committed into Avro trunk for 1.4.0 release via Doug Cutting.
 
 License:
 This project is licensed under the Apache License Version 2.0
@@ -16,6 +17,3 @@ src/java  The main codes.
 src/test  The junit test case using the avro example protocol.
 src/avro/protocol/mail.avpr   Avro example protocol borrowed from http://github.com/phunt/avro-rpc-quickstart/blob/master/src/main/avro/mail.avpr
 src/avro/generated  Generated Java interface and class for the example protocol. The command is : java -cp ./lib/avro-tools-1.3.3.jar org.apache.avro.specific.SpecificCompiler ./src/avro/protocol/mail.avpr ./src/avro/generated
-
-TODO:
-use Ant/Ivy or Maven to manage the library dependencies and build tasks.
